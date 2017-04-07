@@ -18,6 +18,15 @@
 
 package org.apache.hadoop.hive.ql;
 
+// qoop - start import block
+import java.io.FileInputStream;
+import java.io.PrintWriter;
+import java.io.FileOutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+// end import block
+
 import java.io.ByteArrayOutputStream;
 import java.io.DataInput;
 import java.io.IOException;
@@ -445,6 +454,17 @@ public class Driver implements CommandProcessor {
       tree = ParseUtils.findRootNonNullToken(tree);
       perfLogger.PerfLogEnd(CLASS_NAME, PerfLogger.PARSE);
 
+      // qoop
+      if (conf.getBoolVar(HiveConf.ConfVars.HIVE_QOOP_VERBOSE)) {
+          String astDumpFileName = conf.getVar(HiveConf.ConfVars.HIVE_QOOP_FILEID) + ".ast_parse";
+          Path astDumpFile = Paths.get(conf.getVar(HiveConf.ConfVars.HIVE_QOOP_DUMPDIR), astDumpFileName);
+          Files.createDirectories(astDumpFile.getParent());
+          LOG.info("QOOP: Created directory: " + conf.getVar(HiveConf.ConfVars.HIVE_QOOP_DUMPDIR));
+          PrintWriter astWriter = new PrintWriter(astDumpFile.toString(), "UTF-8");
+          astWriter.write(tree.toStringTree());
+          astWriter.close();
+          LOG.info("QOOP: Written AST to " + astDumpFile.toString());
+      }
 
       perfLogger.PerfLogBegin(CLASS_NAME, PerfLogger.ANALYZE);
       BaseSemanticAnalyzer sem = SemanticAnalyzerFactory.get(queryState, tree);
@@ -536,6 +556,19 @@ public class Driver implements CommandProcessor {
           }
         }
       }
+
+      // qoop
+      if (conf.getBoolVar(HiveConf.ConfVars.HIVE_QOOP_VERBOSE)) {
+          String qpDumpFileName = conf.getVar(HiveConf.ConfVars.HIVE_QOOP_FILEID) + ".queryplan";
+          Path qpDumpFile = Paths.get(conf.getVar(HiveConf.ConfVars.HIVE_QOOP_DUMPDIR), qpDumpFileName);
+          Files.createDirectories(qpDumpFile.getParent());
+          LOG.info("QOOP: Created directory: " + conf.getVar(HiveConf.ConfVars.HIVE_QOOP_DUMPDIR));
+          PrintWriter qpWriter = new PrintWriter(qpDumpFile.toString(), "UTF-8");
+          qpWriter.write(plan.toString());
+          qpWriter.close();
+          LOG.info("QOOP: Written Query Plan to " + qpDumpFile.toString());
+      }
+
       return 0;
     } catch (Exception e) {
       if (isInterrupted()) {

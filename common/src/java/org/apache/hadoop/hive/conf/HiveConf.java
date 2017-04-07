@@ -993,6 +993,12 @@ public class HiveConf extends Configuration {
         "How many rows in the right-most join operand Hive should buffer before emitting the join result."),
     HIVEJOINCACHESIZE("hive.join.cache.size", 25000,
         "How many rows in the joining tables (except the streaming table) should be cached in memory."),
+    
+    // qoop related
+    HIVE_QOOP_FILEID("hive.qoop.fileid", "qoop_default_id", "Prefix for qoop dumps."),
+    HIVE_QOOP_DUMPDIR("hive.qoop.dumpdir", "/tmp/qoop", "Directory for qoop dumps."),
+    HIVE_QOOP_VERBOSE("hive.qoop.verbose", true, "Enable qoop dumps."),
+    HIVE_QOOP_COMBINATION("hive.qoop.combination", 0, "Enable retrieval of alternate query plans."),
 
     // CBO related
     HIVE_CBO_ENABLED("hive.cbo.enable", true, "Flag to control enabling Cost Based Optimizations using Calcite framework."),

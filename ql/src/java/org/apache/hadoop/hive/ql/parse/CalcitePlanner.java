@@ -17,6 +17,15 @@
  */
 package org.apache.hadoop.hive.ql.parse;
 
+// qoop - start import block
+import java.io.PrintWriter;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.Arrays;
+import java.util.SortedMap;
+import java.util.TreeMap;
+// end import block
+
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
@@ -914,12 +923,26 @@ public class CalcitePlanner extends SemanticAnalyzer {
       this.partitionCache = partitionCache;
       this.columnAccessInfo = columnAccessInfo;
     }
+    
+    /*
+    // qoop
+    private Double getCumulativeCost(RelNode node) {
+      String digest = RelOptUtil.toString(node, SqlExplainLevel.ALL_ATTRIBUTES).replaceAll("id = [0-9]+\n", "\n");
+      String[] parts = digest.split("\n");
+      String top_line = parts[0];
+      String[] parts1 = top_line.split("[\\s{,]");
+      int index = Arrays.asList(parts1).indexOf("rows");
+      Double c_cost = Double.parseDouble(parts1[index-1]);
+      return c_cost;
+    }
+    */
 
     @Override
     public RelNode apply(RelOptCluster cluster, RelOptSchema relOptSchema, SchemaPlus rootSchema) {
       RelNode calciteGenPlan = null;
       RelNode calcitePreCboPlan = null;
       RelNode calciteOptimizedPlan = null;
+      RelNode calciteVolcanoOptimizedPlan = null;
 
       /*
        * recreate cluster, so that it picks up the additional traitDef
@@ -942,6 +965,7 @@ public class CalcitePlanner extends SemanticAnalyzer {
       PerfLogger perfLogger = SessionState.getPerfLogger();
 
       // 1. Gen Calcite Plan
+      LOG.info("QOOP: starting generation of Calcite Plan");
       perfLogger.PerfLogBegin(this.getClass().getName(), PerfLogger.OPTIMIZER);
       try {
         calciteGenPlan = genLogicalPlan(getQB(), true);
@@ -949,10 +973,12 @@ public class CalcitePlanner extends SemanticAnalyzer {
             relToHiveRR.get(calciteGenPlan),
             HiveConf.getBoolVar(conf, HiveConf.ConfVars.HIVE_RESULTSET_USE_UNIQUE_COLUMN_NAMES));
       } catch (SemanticException e) {
+        LOG.info("QOOP: Semantic Excpetion -- ");
         semanticException = e;
         throw new RuntimeException(e);
       }
       perfLogger.PerfLogEnd(this.getClass().getName(), PerfLogger.OPTIMIZER, "Calcite: Plan generation");
+      LOG.info("QOOP: finished sub-step in generation of Calcite Plan");
 
       // We need to get the ColumnAccessInfo and viewToTableSchema for views.
       HiveRelFieldTrimmer fieldTrimmer = new HiveRelFieldTrimmer(null,
@@ -970,6 +996,22 @@ public class CalcitePlanner extends SemanticAnalyzer {
       calcitePreCboPlan = applyPreJoinOrderingTransforms(calciteGenPlan,
               mdProvider.getMetadataProvider(), executorProvider);
 
+      // qoop - dump pre-cbo plan
+      if(conf.getBoolVar(HiveConf.ConfVars.HIVE_QOOP_VERBOSE)) {
+        String optASTFileName = conf.getVar(HiveConf.ConfVars.HIVE_QOOP_FILEID) + ".precbo";
+        java.nio.file.Path optASTFile = Paths.get(conf.getVar(HiveConf.ConfVars.HIVE_QOOP_DUMPDIR), optASTFileName);
+        try {
+          Files.createDirectories(optASTFile.getParent());
+          PrintWriter optWriter = new PrintWriter(optASTFile.toString(), "UTF-8");
+          optWriter.write(RelOptUtil.toString(calcitePreCboPlan, SqlExplainLevel.ALL_ATTRIBUTES));
+          optWriter.close();
+          LOG.info("QOOP: Written Pre-CBO plan: " + optASTFile.toString());
+        } catch (Exception e) {
+          LOG.error("QOOP: Fault: " + optASTFileName);
+          LOG.error("QOOP: Fault: " + optASTFileName);
+        }
+      }
+
       // 3. Apply join order optimizations: reordering MST algorithm
       //    If join optimizations failed because of missing stats, we continue with
       //    the rest of optimizations
@@ -980,7 +1022,45 @@ public class CalcitePlanner extends SemanticAnalyzer {
           list.add(mdProvider.getMetadataProvider());
           RelTraitSet desiredTraits = cluster
               .traitSetOf(HiveRelNode.CONVENTION, RelCollations.EMPTY);
+          
+          
+          // qoop
+          planner.clear();
+          // ((HiveVolcanoPlanner)planner).registerAbstractRelationalRules();
+          planner.addRule(new JoinToMultiJoinRule(HiveJoin.class));
+          planner.addRule(new LoptOptimizeJoinRule(HiveRelFactories.HIVE_JOIN_FACTORY,
+              HiveRelFactories.HIVE_PROJECT_FACTORY, HiveRelFactories.HIVE_FILTER_FACTORY));
+          planner.registerMetadataProviders(list);
+          RelMetadataProvider chainedProvider = ChainedRelMetadataProvider.of(list);
+          cluster.setMetadataProvider(new CachingRelMetadataProvider(chainedProvider, planner));
+          
+          RelNode rootRel = calcitePreCboPlan;
+          planner.setRoot(rootRel);
+          if (!calcitePreCboPlan.getTraitSet().equals(desiredTraits)) {
+            rootRel = planner.changeTraits(calcitePreCboPlan, desiredTraits);
+            // LOG.info("QOOP: Desired Traits: " + desiredTraits.toString());
+            // LOG.info("QOOP: PreCBO Traits: " + calcitePreCboPlan.getTraitSet().toString());
+            // LOG.info("QOOP: RootRel Traits: " + rootRel.getTraitSet().toString());
+            // if (rootRel instanceof HiveSortLimit)
+                // LOG.info("QOOP: RootRel is instanceof HiveSortLimit");
+          }
+          planner.setRoot(rootRel);
 
+          int combination = HiveConf.getIntVar(conf, ConfVars.HIVE_QOOP_COMBINATION);
+          if (combination < 0) {
+            calciteVolcanoOptimizedPlan = planner.findBestExp();
+          } else {
+            calciteVolcanoOptimizedPlan = planner.findBestExp(combination);
+          }
+          
+          LOG.info("QOOP: Volcano for join optimization.");
+          LOG.info(RelOptUtil.toString(calciteVolcanoOptimizedPlan, SqlExplainLevel.ALL_ATTRIBUTES));
+
+          calciteOptimizedPlan = calciteVolcanoOptimizedPlan;
+          
+
+          // qoop
+          /*
           HepProgramBuilder hepPgmBldr = new HepProgramBuilder().addMatchOrder(HepMatchOrder.BOTTOM_UP);
           hepPgmBldr.addRuleInstance(new JoinToMultiJoinRule(HiveJoin.class));
           hepPgmBldr.addRuleInstance(new LoptOptimizeJoinRule(HiveRelFactories.HIVE_JOIN_FACTORY,
@@ -992,6 +1072,7 @@ public class CalcitePlanner extends SemanticAnalyzer {
           hepPlanner.registerMetadataProviders(list);
           RelMetadataProvider chainedProvider = ChainedRelMetadataProvider.of(list);
           cluster.setMetadataProvider(new CachingRelMetadataProvider(chainedProvider, hepPlanner));
+          
 
           RelNode rootRel = calcitePreCboPlan;
           hepPlanner.setRoot(rootRel);
@@ -1001,6 +1082,7 @@ public class CalcitePlanner extends SemanticAnalyzer {
           hepPlanner.setRoot(rootRel);
 
           calciteOptimizedPlan = hepPlanner.findBestExp();
+          */
         } catch (Exception e) {
           boolean isMissingStats = noColsMissingStats.get() > 0;
           if (isMissingStats) {
@@ -1103,6 +1185,21 @@ public class CalcitePlanner extends SemanticAnalyzer {
             + RelOptUtil.toString(calcitePreCboPlan));
         LOG.debug("Plan After Join Reordering:\n"
             + RelOptUtil.toString(calciteOptimizedPlan, SqlExplainLevel.ALL_ATTRIBUTES));
+      }
+
+      // qoop
+      if(conf.getBoolVar(HiveConf.ConfVars.HIVE_QOOP_VERBOSE)) {
+        String optCBOFileName = conf.getVar(HiveConf.ConfVars.HIVE_QOOP_FILEID) + ".cbo";
+        java.nio.file.Path optCBOFile = Paths.get(conf.getVar(HiveConf.ConfVars.HIVE_QOOP_DUMPDIR), optCBOFileName);
+        try {
+          Files.createDirectories(optCBOFile.getParent());
+          PrintWriter optWriter = new PrintWriter(optCBOFile.toString(), "UTF-8");
+          optWriter.write(RelOptUtil.toString(calciteOptimizedPlan, SqlExplainLevel.ALL_ATTRIBUTES));
+          optWriter.close();
+          LOG.info("QOOP: Written CBO optimized plan: " + optCBOFile.toString());
+        } catch (Exception e) {
+          LOG.info("QOOP: Fault: " + optCBOFile);
+        }
       }
 
       return calciteOptimizedPlan;

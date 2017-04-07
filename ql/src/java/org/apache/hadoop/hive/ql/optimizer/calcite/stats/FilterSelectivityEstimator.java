@@ -21,6 +21,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.plan.RelOptUtil.InputReferencedVisitor;
 import org.apache.calcite.rel.RelNode;
@@ -41,6 +43,7 @@ import org.apache.hadoop.hive.ql.optimizer.calcite.reloperators.HiveTableScan;
 import org.apache.hadoop.hive.ql.plan.ColStatistics;
 
 public class FilterSelectivityEstimator extends RexVisitorImpl<Double> {
+  private static final Logger LOG = LoggerFactory.getLogger(FilterSelectivityEstimator.class.getName());
   private final RelNode childRel;
   private final double  childCardinality;
 
@@ -91,10 +94,11 @@ public class FilterSelectivityEstimator extends RexVisitorImpl<Double> {
       if (childRel instanceof HiveTableScan) {
         double noOfNulls = getMaxNulls(call, (HiveTableScan) childRel);
         double totalNoOfTuples = childRel.getRows();
+        LOG.info("Table: " + ((HiveTableScan) childRel).getTableAlias() + ", Tuples: " + totalNoOfTuples);
         if (totalNoOfTuples >= noOfNulls) {
           selectivity = (totalNoOfTuples - noOfNulls) / Math.max(totalNoOfTuples, 1);
         } else {
-          throw new RuntimeException("Invalid Stats number of null > no of tuples");
+          throw new RuntimeException("Invalid Stats number of null > no of tuples in table " + ((HiveTableScan) childRel).getTableAlias());
         }
       } else {
         selectivity = computeNotEqualitySelectivity(call);
@@ -240,6 +244,7 @@ public class FilterSelectivityEstimator extends RexVisitorImpl<Double> {
     for (ColStatistics cs : colStats) {
       tmpNoNulls = cs.getNumNulls();
       if (tmpNoNulls > maxNoNulls) {
+        LOG.info("Table: " + t.getTableAlias() + ", Column: " + cs.getColumnName() + ", Nulls: " + tmpNoNulls);
         maxNoNulls = tmpNoNulls;
       }
     }

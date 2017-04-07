@@ -18,6 +18,17 @@
 
 package org.apache.hadoop.hive.ql.exec.tez;
 
+// qoop - start import block
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.PrintWriter;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import org.apache.hadoop.hive.conf.HiveConf.ConfVars;
+import org.apache.hadoop.hive.ql.exec.SerializationUtilities;
+import org.apache.hadoop.yarn.api.records.URL;
+// end import block
+
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
@@ -112,6 +123,21 @@ public class TezTask extends Task<TezWork> {
   public TezCounters getTezCounters() {
     return counters;
   }
+  
+  // qoop
+  private String convertLrToString(LocalResource lr) {
+    StringBuilder sb = new StringBuilder();
+    sb.append("size:|" + lr.getSize() + "|");
+    sb.append("type:|" + lr.getType() + "|");
+    sb.append("timestamp:|" + lr.getTimestamp() + "|");
+    sb.append("visibility:|" + lr.getVisibility() + "|");
+    URL url = lr.getResource();
+    sb.append("scheme:|" + url.getScheme() + "|");
+    sb.append("host:|" + url.getHost() + "|");
+    sb.append("port:|" + url.getPort() + "|");
+    sb.append("file:|" + url.getFile());
+    return sb.toString();
+  }
 
   @Override
   public int execute(DriverContext driverContext) {
@@ -160,6 +186,55 @@ public class TezTask extends Task<TezWork> {
         // unless already installed on all the cluster nodes, we'll have to
         // localize hive-exec.jar as well.
         LocalResource appJarLr = session.getAppJarLr();
+        
+        // qoop
+        LOG.info("QOOP: Parameters sent to build Tez DAG");
+        if (HiveConf.getBoolVar(conf, ConfVars.HIVE_QOOP_VERBOSE)) {
+          String fName = HiveConf.getVar(conf, ConfVars.HIVE_QOOP_FILEID) + ".tezwork";
+          java.nio.file.Path fPath = Paths.get(HiveConf.getVar(conf, ConfVars.HIVE_QOOP_DUMPDIR), fName);
+          try {
+		    Files.createDirectories(fPath.getParent());
+			FileOutputStream op_stream = new FileOutputStream(fPath.toString());
+			SerializationUtilities.serializePlan(work, op_stream);	
+            op_stream.close();
+            LOG.info("QOOP: Serialized TezWork to: " + fPath.toString());
+	
+            FileInputStream in_stream = new FileInputStream(fPath.toString());
+            SerializationUtilities.deserializePlan(in_stream, TezWork.class);
+            in_stream.close();
+          } catch (Exception e) {
+            LOG.error("QOOP: Serialization of TezWork faulty: " + fName);
+            LOG.error("QOOP: StackTrace: " + e.getMessage());
+          }
+
+          fName = HiveConf.getVar(conf, ConfVars.HIVE_QOOP_FILEID) + ".conf.xml"; 
+          fPath = Paths.get(HiveConf.getVar(conf, ConfVars.HIVE_QOOP_DUMPDIR), fName);
+          try {
+            FileOutputStream op_stream = new FileOutputStream(fPath.toString());
+            jobConf.writeXml(op_stream);
+            op_stream.close();
+            LOG.info("QOOP: Written jobConf: " + fPath.toString());
+          } catch (Exception e) {
+            LOG.error("QOOP: Writing jobConf faulty: " + fName);
+            LOG.error("QOOP: StackTrace: " + e.getMessage());
+          }
+
+          fName = HiveConf.getVar(conf, ConfVars.HIVE_QOOP_FILEID) + ".resources.txt";
+          fPath = Paths.get(HiveConf.getVar(conf, ConfVars.HIVE_QOOP_DUMPDIR), fName);
+          try {
+            PrintWriter op_stream = new PrintWriter(fPath.toString(), "UTF-8");
+            op_stream.write("scratchDir: " + scratchDir + "\n");
+            op_stream.write("appJarLr: " + convertLrToString(appJarLr) + "\n");
+            for (LocalResource lr: additionalLr) {
+                op_stream.write("additionalLr: " + convertLrToString(lr) + "\n");
+            }
+            op_stream.write("ctx (unused):  " + ctx.toString() + "\n");
+            op_stream.close();
+          } catch (Exception e) {
+            LOG.error("QOOP: Writing local resources and scratchDir faulty: " + fName);
+            LOG.error("QOOP: StackTrace: " + e.getMessage());
+          }
+        }
 
         // next we translate the TezWork to a Tez DAG
         DAG dag = build(jobConf, work, scratchDir, appJarLr, additionalLr, ctx);
@@ -167,6 +242,43 @@ public class TezTask extends Task<TezWork> {
             "HIVE", queryPlan.getQueryId(),
             "HIVE_QUERY_ID", queryPlan.getQueryStr());
         dag.setCallerContext(callerContext);
+
+        // qoop
+        if (conf.getBoolVar(HiveConf.ConfVars.HIVE_QOOP_VERBOSE)) {
+          String dagFileName = conf.getVar(HiveConf.ConfVars.HIVE_QOOP_FILEID) + ".dag";
+          java.nio.file.Path dagFile = Paths.get(conf.getVar(HiveConf.ConfVars.HIVE_QOOP_DUMPDIR), dagFileName);
+          try {
+            Files.createDirectories(dagFile.getParent());
+            PrintWriter pw = new PrintWriter(dagFile.toString(), "UTF-8");
+            pw.write("Printing Logical DAG\n");
+            Map<String, Vertex> vertex_names = new HashMap<String, Vertex>();
+            for(Vertex v : dag.getVertices()) {
+              pw.write("Vertex:" + v.getName() + "\n");
+              vertex_names.put(v.getName(), v);
+            }
+            for (Vertex src: dag.getVertices()) {
+              for (Vertex dst : src.getOutputVertices()) {
+                pw.write("Edge:" + src.getName() + ":" + dst.getName() + "\n");
+              }
+            }
+            for (BaseWork w: work.getAllWork()) {
+              if (w.getName().contains("Map")) {
+                String tablename = null;
+                for (String s: ((MapWork)w).getPathToAliases().keySet()) {
+                  String[] parts = s.split("/");
+                  tablename = parts[parts.length - 1];
+                  break;
+                }
+                pw.write("Input:" + w.getName() + ":" + tablename + "\n");
+              }
+            }
+            pw.close();
+            LOG.info("QOOP: Written DAG description: " + dagFile.toString());
+          } catch (Exception e) {
+              LOG.error("QOOP: Faulty: " + dagFileName);
+              LOG.error("QOOP: StackTrace: " + e.getMessage());
+          }
+        }
 
         // Add the extra resources to the dag
         addExtraResourcesToDag(session, dag, inputOutputJars, inputOutputLocalResources);
@@ -420,6 +532,40 @@ public class TezTask extends Task<TezWork> {
     perfLogger.PerfLogEnd(CLASS_NAME, PerfLogger.TEZ_BUILD_DAG);
     return dag;
   }
+
+  /*
+  // qoop
+  public String toStringDetailed() {
+    StringBuilder sb = new StringBuilder();
+    sb.append("\nTask Id (toString) " + this.getId() + "," + this.toString());
+    sb.append("\nBaseWork adjacency map:");
+    if (getWork() != null) {
+      for (BaseWork b : getWork().getAllWorkUnsorted()) {
+        sb.append("\n\t" + b.getName() + " : ");
+        for (BaseWork c : getWork().getChildren(b)) {
+          sb.append(" " + c.getName());
+        }
+      }
+    }
+    sb.append("\nBaseWork operator info:");
+    if (getWork() != null) {
+      for (BaseWork b : getWork().getAllWorkUnsorted()) {
+        sb.append("\n\t" + b.getName() + " : ");
+        for (Operator<?> op : b.getAllOperators()) {
+          sb.append(" " + op.getOperatorId());
+        }
+      }
+    }
+
+    int parentsize = (getParentTasks() == null) ? 0 : getParentTasks().size();
+    sb.append("\nParent Task details (" + parentsize + ") :");
+
+    int childrensize =  (getChildTasks() == null) ? 0 : getChildTasks().size();
+    sb.append("\nChildren details ("+getChildTasks().size()+") :");
+
+    return sb.toString();
+  }
+  */
 
   public static void setAccessControlsForCurrentUser(DAG dag) {
     // get current user
