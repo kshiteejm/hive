@@ -1,0 +1,5 @@
+common/src/java/org/apache/hadoop/hive/conf/HiveConf.java
+ql/src/java/org/apache/hadoop/hive/ql/Driver.java
+ql/src/java/org/apache/hadoop/hive/ql/exec/tez/TezTask.java
+ql/src/java/org/apache/hadoop/hive/ql/optimizer/calcite/stats/FilterSelectivityEstimator.java
+ql/src/java/org/apache/hadoop/hive/ql/parse/CalcitePlanner.java
