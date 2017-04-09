@@ -74,6 +74,7 @@ import org.apache.calcite.rel.metadata.CachingRelMetadataProvider;
 import org.apache.calcite.rel.metadata.ChainedRelMetadataProvider;
 import org.apache.calcite.rel.metadata.RelMetadataProvider;
 import org.apache.calcite.rel.rules.FilterMergeRule;
+import org.apache.calcite.rel.rules.JoinPushThroughJoinRule;
 import org.apache.calcite.rel.rules.JoinToMultiJoinRule;
 import org.apache.calcite.rel.rules.LoptOptimizeJoinRule;
 import org.apache.calcite.rel.rules.ProjectMergeRule;
@@ -1028,9 +1029,13 @@ public class CalcitePlanner extends SemanticAnalyzer {
           planner.clear();
           // ((HiveVolcanoPlanner)planner).registerAbstractRelationalRules();
           planner.addRule(new JoinToMultiJoinRule(HiveJoin.class));
+          /*
           planner.addRule(new LoptOptimizeJoinRule(HiveRelFactories.HIVE_JOIN_FACTORY,
               HiveRelFactories.HIVE_PROJECT_FACTORY, HiveRelFactories.HIVE_FILTER_FACTORY));
           planner.registerMetadataProviders(list);
+          */
+          planner.addRule(new JoinPushThroughJoinRule("JoinPushThroughJoin:left", false, HiveJoin.class, HiveRelFactories.HIVE_PROJECT_FACTORY));
+          planner.addRule(new JoinPushThroughJoinRule("JoinPushThroughJoin:right", true, HiveJoin.class, HiveRelFactories.HIVE_PROJECT_FACTORY));
           RelMetadataProvider chainedProvider = ChainedRelMetadataProvider.of(list);
           cluster.setMetadataProvider(new CachingRelMetadataProvider(chainedProvider, planner));
           
