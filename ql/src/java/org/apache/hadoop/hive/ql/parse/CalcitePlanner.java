@@ -1028,14 +1028,15 @@ public class CalcitePlanner extends SemanticAnalyzer {
           // qoop
           planner.clear();
           // ((HiveVolcanoPlanner)planner).registerAbstractRelationalRules();
+          
           planner.addRule(new JoinToMultiJoinRule(HiveJoin.class));
-          /*
+          
           planner.addRule(new LoptOptimizeJoinRule(HiveRelFactories.HIVE_JOIN_FACTORY,
               HiveRelFactories.HIVE_PROJECT_FACTORY, HiveRelFactories.HIVE_FILTER_FACTORY));
-          planner.registerMetadataProviders(list);
-          */
+          
           planner.addRule(new JoinPushThroughJoinRule("JoinPushThroughJoin:left", false, HiveJoin.class, HiveRelFactories.HIVE_PROJECT_FACTORY));
           planner.addRule(new JoinPushThroughJoinRule("JoinPushThroughJoin:right", true, HiveJoin.class, HiveRelFactories.HIVE_PROJECT_FACTORY));
+          planner.registerMetadataProviders(list);
           RelMetadataProvider chainedProvider = ChainedRelMetadataProvider.of(list);
           cluster.setMetadataProvider(new CachingRelMetadataProvider(chainedProvider, planner));
           
