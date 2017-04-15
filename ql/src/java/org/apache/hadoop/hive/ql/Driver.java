@@ -564,7 +564,8 @@ public class Driver implements CommandProcessor {
           Files.createDirectories(qpDumpFile.getParent());
           LOG.info("QOOP: Created directory: " + conf.getVar(HiveConf.ConfVars.HIVE_QOOP_DUMPDIR));
           PrintWriter qpWriter = new PrintWriter(qpDumpFile.toString(), "UTF-8");
-          qpWriter.write(plan.toString());
+          // qpWriter.write(plan.toString());
+          qpWriter.write(getExplainOutput(sem, plan, tree));
           qpWriter.close();
           LOG.info("QOOP: Written Query Plan to " + qpDumpFile.toString());
       }
