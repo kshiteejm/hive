@@ -77,6 +77,7 @@ import org.apache.calcite.rel.rules.FilterMergeRule;
 import org.apache.calcite.rel.rules.JoinPushThroughJoinRule;
 import org.apache.calcite.rel.rules.JoinToMultiJoinRule;
 import org.apache.calcite.rel.rules.LoptOptimizeJoinRule;
+import org.apache.calcite.rel.rules.MultiJoinOptimizeBushyRule;
 import org.apache.calcite.rel.rules.ProjectMergeRule;
 import org.apache.calcite.rel.rules.ProjectRemoveRule;
 import org.apache.calcite.rel.rules.SemiJoinFilterTransposeRule;
@@ -1029,11 +1030,14 @@ public class CalcitePlanner extends SemanticAnalyzer {
           planner.clear();
           // ((HiveVolcanoPlanner)planner).registerAbstractRelationalRules();
           
+          /*
           planner.addRule(new JoinToMultiJoinRule(HiveJoin.class));
+          
+          planner.addRule(new MultiJoinOptimizeBushyRule(HiveRelFactories.HIVE_JOIN_FACTORY, HiveRelFactories.HIVE_PROJECT_FACTORY));
           
           planner.addRule(new LoptOptimizeJoinRule(HiveRelFactories.HIVE_JOIN_FACTORY,
               HiveRelFactories.HIVE_PROJECT_FACTORY, HiveRelFactories.HIVE_FILTER_FACTORY));
-          
+          */
           planner.addRule(new JoinPushThroughJoinRule("JoinPushThroughJoin:left", false, HiveJoin.class, HiveRelFactories.HIVE_PROJECT_FACTORY));
           planner.addRule(new JoinPushThroughJoinRule("JoinPushThroughJoin:right", true, HiveJoin.class, HiveRelFactories.HIVE_PROJECT_FACTORY));
           planner.registerMetadataProviders(list);
