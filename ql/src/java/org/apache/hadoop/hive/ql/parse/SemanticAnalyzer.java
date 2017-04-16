@@ -10941,12 +10941,12 @@ public class SemanticAnalyzer extends BaseSemanticAnalyzer {
 
     // 9. Optimize Physical op tree & Translate to target execution engine (MR,
     // TEZ..)
-    if (!ctx.getExplainLogical()) {
+    // if (!ctx.getExplainLogical()) {
       TaskCompiler compiler = TaskCompilerFactory.getCompiler(conf, pCtx);
       compiler.init(queryState, console, db);
       compiler.compile(pCtx, rootTasks, inputs, outputs);
       fetchTask = pCtx.getFetchTask();
-    }
+    // }
     LOG.info("Completed plan generation");
 
     // 10. put accessed columns to readEntity

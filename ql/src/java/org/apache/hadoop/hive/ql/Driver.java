@@ -467,109 +467,111 @@ public class Driver implements CommandProcessor {
       }
 
       perfLogger.PerfLogBegin(CLASS_NAME, PerfLogger.ANALYZE);
-      BaseSemanticAnalyzer sem = SemanticAnalyzerFactory.get(queryState, tree);
-      List<HiveSemanticAnalyzerHook> saHooks =
-          getHooks(HiveConf.ConfVars.SEMANTIC_ANALYZER_HOOK,
-              HiveSemanticAnalyzerHook.class);
+      for (int i = 0; i < 4; i++) {
+          BaseSemanticAnalyzer sem = SemanticAnalyzerFactory.get(queryState, tree);
+          conf.setIntVar(HiveConf.ConfVars.HIVE_QOOP_COMBINATION, i);
+          List<HiveSemanticAnalyzerHook> saHooks =
+              getHooks(HiveConf.ConfVars.SEMANTIC_ANALYZER_HOOK,
+                  HiveSemanticAnalyzerHook.class);
 
-      // Flush the metastore cache.  This assures that we don't pick up objects from a previous
-      // query running in this same thread.  This has to be done after we get our semantic
-      // analyzer (this is when the connection to the metastore is made) but before we analyze,
-      // because at that point we need access to the objects.
-      Hive.get().getMSC().flushCache();
+          // Flush the metastore cache.  This assures that we don't pick up objects from a previous
+          // query running in this same thread.  This has to be done after we get our semantic
+          // analyzer (this is when the connection to the metastore is made) but before we analyze,
+          // because at that point we need access to the objects.
+          Hive.get().getMSC().flushCache();
 
-      // Do semantic analysis and plan generation
-      if (saHooks != null && !saHooks.isEmpty()) {
-        HiveSemanticAnalyzerHookContext hookCtx = new HiveSemanticAnalyzerHookContextImpl();
-        hookCtx.setConf(conf);
-        hookCtx.setUserName(userName);
-        hookCtx.setIpAddress(SessionState.get().getUserIpAddress());
-        hookCtx.setCommand(command);
-        for (HiveSemanticAnalyzerHook hook : saHooks) {
-          tree = hook.preAnalyze(hookCtx, tree);
-        }
-        sem.analyze(tree, ctx);
-        hookCtx.update(sem);
-        for (HiveSemanticAnalyzerHook hook : saHooks) {
-          hook.postAnalyze(hookCtx, sem.getAllRootTasks());
-        }
-      } else {
-        sem.analyze(tree, ctx);
-      }
-      // Record any ACID compliant FileSinkOperators we saw so we can add our transaction ID to
-      // them later.
-      acidSinks = sem.getAcidFileSinks();
+          // Do semantic analysis and plan generation
+          if (saHooks != null && !saHooks.isEmpty()) {
+            HiveSemanticAnalyzerHookContext hookCtx = new HiveSemanticAnalyzerHookContextImpl();
+            hookCtx.setConf(conf);
+            hookCtx.setUserName(userName);
+            hookCtx.setIpAddress(SessionState.get().getUserIpAddress());
+            hookCtx.setCommand(command);
+            for (HiveSemanticAnalyzerHook hook : saHooks) {
+              tree = hook.preAnalyze(hookCtx, tree);
+            }
+            sem.analyze(tree, ctx);
+            hookCtx.update(sem);
+            for (HiveSemanticAnalyzerHook hook : saHooks) {
+              hook.postAnalyze(hookCtx, sem.getAllRootTasks());
+            }
+          } else {
+            sem.analyze(tree, ctx);
+          }
+          // Record any ACID compliant FileSinkOperators we saw so we can add our transaction ID to
+          // them later.
+          acidSinks = sem.getAcidFileSinks();
 
-      LOG.info("Semantic Analysis Completed");
+          LOG.info("Semantic Analysis Completed");
 
-      // validate the plan
-      sem.validate();
-      acidInQuery = sem.hasAcidInQuery();
-      perfLogger.PerfLogEnd(CLASS_NAME, PerfLogger.ANALYZE);
+          // validate the plan
+          sem.validate();
+          acidInQuery = sem.hasAcidInQuery();
+          perfLogger.PerfLogEnd(CLASS_NAME, PerfLogger.ANALYZE);
 
-      if (isInterrupted()) {
-        return handleInterruption("after analyzing query.");
-      }
+          if (isInterrupted()) {
+            return handleInterruption("after analyzing query.");
+          }
 
-      // get the output schema
-      schema = getSchema(sem, conf);
-      plan = new QueryPlan(queryStr, sem, perfLogger.getStartTime(PerfLogger.DRIVER_RUN), queryId,
-        queryState.getHiveOperation(), schema);
+          // get the output schema
+          schema = getSchema(sem, conf);
+          plan = new QueryPlan(queryStr, sem, perfLogger.getStartTime(PerfLogger.DRIVER_RUN), queryId,
+            queryState.getHiveOperation(), schema);
 
-      conf.setQueryString(queryStr);
+          conf.setQueryString(queryStr);
 
-      conf.set("mapreduce.workflow.id", "hive_" + queryId);
-      conf.set("mapreduce.workflow.name", queryStr);
+          conf.set("mapreduce.workflow.id", "hive_" + queryId);
+          conf.set("mapreduce.workflow.name", queryStr);
 
-      // initialize FetchTask right here
-      if (plan.getFetchTask() != null) {
-        plan.getFetchTask().initialize(queryState, plan, null, ctx.getOpContext());
-      }
+          // initialize FetchTask right here
+          if (plan.getFetchTask() != null) {
+            plan.getFetchTask().initialize(queryState, plan, null, ctx.getOpContext());
+          }
 
-      //do the authorization check
-      if (!sem.skipAuthorization() &&
-          HiveConf.getBoolVar(conf, HiveConf.ConfVars.HIVE_AUTHORIZATION_ENABLED)) {
+          //do the authorization check
+          if (!sem.skipAuthorization() &&
+              HiveConf.getBoolVar(conf, HiveConf.ConfVars.HIVE_AUTHORIZATION_ENABLED)) {
 
-        try {
-          perfLogger.PerfLogBegin(CLASS_NAME, PerfLogger.DO_AUTHORIZATION);
-          doAuthorization(queryState.getHiveOperation(), sem, command);
-        } catch (AuthorizationException authExp) {
-          console.printError("Authorization failed:" + authExp.getMessage()
-              + ". Use SHOW GRANT to get more details.");
-          errorMessage = authExp.getMessage();
-          SQLState = "42000";
-          return 403;
-        } finally {
-          perfLogger.PerfLogEnd(CLASS_NAME, PerfLogger.DO_AUTHORIZATION);
-        }
-      }
+            try {
+              perfLogger.PerfLogBegin(CLASS_NAME, PerfLogger.DO_AUTHORIZATION);
+              doAuthorization(queryState.getHiveOperation(), sem, command);
+            } catch (AuthorizationException authExp) {
+              console.printError("Authorization failed:" + authExp.getMessage()
+                  + ". Use SHOW GRANT to get more details.");
+              errorMessage = authExp.getMessage();
+              SQLState = "42000";
+              return 403;
+            } finally {
+              perfLogger.PerfLogEnd(CLASS_NAME, PerfLogger.DO_AUTHORIZATION);
+            }
+          }
 
-      if (conf.getBoolVar(ConfVars.HIVE_LOG_EXPLAIN_OUTPUT)) {
-        String explainOutput = getExplainOutput(sem, plan, tree);
-        if (explainOutput != null) {
           if (conf.getBoolVar(ConfVars.HIVE_LOG_EXPLAIN_OUTPUT)) {
-            LOG.info("EXPLAIN output for queryid " + queryId + " : "
-              + explainOutput);
+            String explainOutput = getExplainOutput(sem, plan, tree);
+            if (explainOutput != null) {
+              if (conf.getBoolVar(ConfVars.HIVE_LOG_EXPLAIN_OUTPUT)) {
+                LOG.info("EXPLAIN output for queryid " + queryId + " : "
+                  + explainOutput);
+              }
+              if (conf.isWebUiQueryInfoCacheEnabled()) {
+                queryDisplay.setExplainPlan(explainOutput);
+              }
+            }
           }
-          if (conf.isWebUiQueryInfoCacheEnabled()) {
-            queryDisplay.setExplainPlan(explainOutput);
+
+          // qoop
+          if (conf.getBoolVar(HiveConf.ConfVars.HIVE_QOOP_VERBOSE)) {
+              String qpDumpFileName = conf.getVar(HiveConf.ConfVars.HIVE_QOOP_FILEID) + "-" + i + ".queryplan";
+              Path qpDumpFile = Paths.get(conf.getVar(HiveConf.ConfVars.HIVE_QOOP_DUMPDIR), qpDumpFileName);
+              Files.createDirectories(qpDumpFile.getParent());
+              LOG.info("QOOP: Created directory: " + conf.getVar(HiveConf.ConfVars.HIVE_QOOP_DUMPDIR));
+              PrintWriter qpWriter = new PrintWriter(qpDumpFile.toString(), "UTF-8");
+              // qpWriter.write(plan.toString());
+              qpWriter.write(getExplainOutput(sem, plan, tree));
+              qpWriter.close();
+              LOG.info("QOOP: Written Query Plan to " + qpDumpFile.toString());
           }
-        }
       }
-
-      // qoop
-      if (conf.getBoolVar(HiveConf.ConfVars.HIVE_QOOP_VERBOSE)) {
-          String qpDumpFileName = conf.getVar(HiveConf.ConfVars.HIVE_QOOP_FILEID) + ".queryplan";
-          Path qpDumpFile = Paths.get(conf.getVar(HiveConf.ConfVars.HIVE_QOOP_DUMPDIR), qpDumpFileName);
-          Files.createDirectories(qpDumpFile.getParent());
-          LOG.info("QOOP: Created directory: " + conf.getVar(HiveConf.ConfVars.HIVE_QOOP_DUMPDIR));
-          PrintWriter qpWriter = new PrintWriter(qpDumpFile.toString(), "UTF-8");
-          // qpWriter.write(plan.toString());
-          qpWriter.write(getExplainOutput(sem, plan, tree));
-          qpWriter.close();
-          LOG.info("QOOP: Written Query Plan to " + qpDumpFile.toString());
-      }
-
       return 0;
     } catch (Exception e) {
       if (isInterrupted()) {
