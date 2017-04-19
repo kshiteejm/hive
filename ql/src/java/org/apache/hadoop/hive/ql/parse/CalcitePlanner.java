@@ -1001,7 +1001,8 @@ public class CalcitePlanner extends SemanticAnalyzer {
       int dagnum = conf.getIntVar(HiveConf.ConfVars.HIVE_QOOP_COMBINATION);
       // qoop - dump pre-cbo plan
       if(conf.getBoolVar(HiveConf.ConfVars.HIVE_QOOP_VERBOSE)) {
-        String optASTFileName = conf.getVar(HiveConf.ConfVars.HIVE_QOOP_FILEID) + "-" + dagnum + ".precbo";
+        // String optASTFileName = conf.getVar(HiveConf.ConfVars.HIVE_QOOP_FILEID) + "-" + dagnum + ".precbo";
+        String optASTFileName = conf.getVar(HiveConf.ConfVars.HIVE_QOOP_FILEID) + ".precbo";
         java.nio.file.Path optASTFile = Paths.get(conf.getVar(HiveConf.ConfVars.HIVE_QOOP_DUMPDIR), optASTFileName);
         try {
           Files.createDirectories(optASTFile.getParent());
@@ -1200,7 +1201,8 @@ public class CalcitePlanner extends SemanticAnalyzer {
 
       // qoop
       if(conf.getBoolVar(HiveConf.ConfVars.HIVE_QOOP_VERBOSE)) {
-        String optCBOFileName = conf.getVar(HiveConf.ConfVars.HIVE_QOOP_FILEID) + "-" + dagnum + ".cbo";
+        // String optCBOFileName = conf.getVar(HiveConf.ConfVars.HIVE_QOOP_FILEID) + "-" + dagnum + ".cbo";
+        String optCBOFileName = conf.getVar(HiveConf.ConfVars.HIVE_QOOP_FILEID) + ".cbo";
         java.nio.file.Path optCBOFile = Paths.get(conf.getVar(HiveConf.ConfVars.HIVE_QOOP_DUMPDIR), optCBOFileName);
         try {
           Files.createDirectories(optCBOFile.getParent());

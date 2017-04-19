@@ -148,6 +148,7 @@ public class Driver implements CommandProcessor {
   private Context ctx;
   private DriverContext driverCxt;
   private QueryPlan plan;
+  private List<QueryPlan> plans;
   private Schema schema;
   private String errorMessage;
   private String SQLState;
@@ -467,9 +468,9 @@ public class Driver implements CommandProcessor {
       }
 
       perfLogger.PerfLogBegin(CLASS_NAME, PerfLogger.ANALYZE);
-      for (int i = 0; i < 4; i++) {
+      for (int i = 0; i < 1; i++) {
           BaseSemanticAnalyzer sem = SemanticAnalyzerFactory.get(queryState, tree);
-          conf.setIntVar(HiveConf.ConfVars.HIVE_QOOP_COMBINATION, i);
+          // conf.setIntVar(HiveConf.ConfVars.HIVE_QOOP_COMBINATION, i);
           List<HiveSemanticAnalyzerHook> saHooks =
               getHooks(HiveConf.ConfVars.SEMANTIC_ANALYZER_HOOK,
                   HiveSemanticAnalyzerHook.class);
@@ -528,6 +529,11 @@ public class Driver implements CommandProcessor {
             plan.getFetchTask().initialize(queryState, plan, null, ctx.getOpContext());
           }
 
+          if (plans == null) {
+            plans = new LinkedList<QueryPlan>();
+            plans.add(plan);
+          }
+
           //do the authorization check
           if (!sem.skipAuthorization() &&
               HiveConf.getBoolVar(conf, HiveConf.ConfVars.HIVE_AUTHORIZATION_ENABLED)) {
@@ -561,7 +567,8 @@ public class Driver implements CommandProcessor {
 
           // qoop
           if (conf.getBoolVar(HiveConf.ConfVars.HIVE_QOOP_VERBOSE)) {
-              String qpDumpFileName = conf.getVar(HiveConf.ConfVars.HIVE_QOOP_FILEID) + "-" + i + ".queryplan";
+              // String qpDumpFileName = conf.getVar(HiveConf.ConfVars.HIVE_QOOP_FILEID) + "-" + i + ".queryplan";
+              String qpDumpFileName = conf.getVar(HiveConf.ConfVars.HIVE_QOOP_FILEID) + ".queryplan";
               Path qpDumpFile = Paths.get(conf.getVar(HiveConf.ConfVars.HIVE_QOOP_DUMPDIR), qpDumpFileName);
               Files.createDirectories(qpDumpFile.getParent());
               LOG.info("QOOP: Created directory: " + conf.getVar(HiveConf.ConfVars.HIVE_QOOP_DUMPDIR));
@@ -1697,6 +1704,9 @@ public class Driver implements CommandProcessor {
       Hive.get().clearMetaCallTiming();
 
       plan.setStarted();
+      // for (QueryPlan aplan: plans) {
+      //   aplan.setStarted();
+      // }
 
       if (SessionState.get() != null) {
         SessionState.get().getHiveHistory().startQuery(queryStr,
@@ -2076,6 +2086,60 @@ public class Driver implements CommandProcessor {
    *          the driver context
    */
   private TaskRunner launchTask(Task<? extends Serializable> tsk, String queryId, boolean noName,
+      String jobname, int jobs, DriverContext cxt) throws HiveException {
+    if (SessionState.get() != null) {
+      SessionState.get().getHiveHistory().startTask(queryId, tsk, tsk.getClass().getName());
+    }
+    if (tsk.isMapRedTask() && !(tsk instanceof ConditionalTask)) {
+      if (noName) {
+        conf.set(MRJobConfig.JOB_NAME, jobname + "(" + tsk.getId() + ")");
+      }
+      conf.set("mapreduce.workflow.node.name", tsk.getId());
+      Utilities.setWorkflowAdjacencies(conf, plan);
+      cxt.incCurJobNo(1);
+      console.printInfo("Launching Job " + cxt.getCurJobNo() + " out of " + jobs);
+    }
+    tsk.initialize(queryState, plan, cxt, ctx.getOpContext());
+    TaskResult tskRes = new TaskResult();
+    TaskRunner tskRun = new TaskRunner(tsk, tskRes);
+
+    cxt.launching(tskRun);
+    // Launch Task
+    if (HiveConf.getBoolVar(conf, HiveConf.ConfVars.EXECPARALLEL) && tsk.isMapRedTask()) {
+      // Launch it in the parallel mode, as a separate thread only for MR tasks
+      if (LOG.isInfoEnabled()){
+        LOG.info("Starting task [" + tsk + "] in parallel");
+      }
+      tskRun.setOperationLog(OperationLog.getCurrentOperationLog());
+      tskRun.start();
+    } else {
+      if (LOG.isInfoEnabled()){
+        LOG.info("Starting task [" + tsk + "] in serial mode");
+      }
+      tskRun.runSequential();
+    }
+    return tskRun;
+  }
+
+  /**
+   * QOOP: 
+   *
+   * Launches a new task with possible alternate tasks registered as well
+   *
+   * @param tsk
+   *          task being launched
+   * @param queryId
+   *          Id of the query containing the task
+   * @param noName
+   *          whether the task has a name set
+   * @param jobname
+   *          name of the task, if it is a map-reduce job
+   * @param jobs
+   *          number of map-reduce jobs
+   * @param cxt
+   *          the driver context
+   */
+  private TaskRunner launchTask(List<Task<? extends Serializable>> tsks, String queryId, boolean noName,
       String jobname, int jobs, DriverContext cxt) throws HiveException {
     if (SessionState.get() != null) {
       SessionState.get().getHiveHistory().startTask(queryId, tsk, tsk.getClass().getName());
