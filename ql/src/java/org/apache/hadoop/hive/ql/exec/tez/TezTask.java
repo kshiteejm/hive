@@ -29,6 +29,7 @@ import org.apache.hadoop.hive.ql.exec.SerializationUtilities;
 import org.apache.hadoop.yarn.api.records.URL;
 // end import block
 
+import java.io.Serializable;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
@@ -40,6 +41,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.ArrayList;
 
 import javax.annotation.Nullable;
 
@@ -235,9 +237,58 @@ public class TezTask extends Task<TezWork> {
             LOG.error("QOOP: StackTrace: " + e.getMessage());
           }
         }
+        
+        // qoop: alternate DAGs to add to main primary DAG
+        List<DAG> alternateDAGs = new ArrayList<DAG>();
+        int tmpcnt = 0;
+        for (Task<? extends Serializable> tsk: getAlternateTasks()) {
+          tmpcnt++;
+          TezWork altwork = (TezWork) tsk.getWork();
+          DAG altdag = build(jobConf, altwork, scratchDir, appJarLr, additionalLr, ctx);
+          alternateDAGs.add(altdag);  
+            if (conf.getBoolVar(HiveConf.ConfVars.HIVE_QOOP_VERBOSE)) {
+              String dagFileName = conf.getVar(HiveConf.ConfVars.HIVE_QOOP_FILEID) + "-" + tmpcnt + ".dag";
+              java.nio.file.Path dagFile = Paths.get(conf.getVar(HiveConf.ConfVars.HIVE_QOOP_DUMPDIR), dagFileName);
+              try {
+                Files.createDirectories(dagFile.getParent());
+                PrintWriter pw = new PrintWriter(dagFile.toString(), "UTF-8");
+                pw.write("Printing Logical DAG\n");
+                Map<String, Vertex> vertex_names = new HashMap<String, Vertex>();
+                for(Vertex v : altdag.getVertices()) {
+                  pw.write("Vertex:" + v.getName() + "\n");
+                  vertex_names.put(v.getName(), v);
+                }
+                for (Vertex src: altdag.getVertices()) {
+                  for (Vertex dst : src.getOutputVertices()) {
+                    pw.write("Edge:" + src.getName() + ":" + dst.getName() + "\n");
+                  }
+                }
+                for (BaseWork w: altwork.getAllWork()) {
+                  if (w.getName().contains("Map")) {
+                    String tablename = null;
+                    for (String s: ((MapWork)w).getPathToAliases().keySet()) {
+                      String[] parts = s.split("/");
+                      tablename = parts[parts.length - 1];
+                      break;
+                    }
+                    pw.write("Input:" + w.getName() + ":" + tablename + "\n");
+                  }
+                }
+                pw.close();
+                LOG.info("QOOP: Written DAG description: " + dagFile.toString());
+              } catch (Exception e) {
+                  LOG.error("QOOP: Faulty: " + dagFileName);
+                  LOG.error("QOOP: StackTrace: " + e.getMessage());
+              }
+            }
+        }
+        // qoop: end of changes
 
         // next we translate the TezWork to a Tez DAG
         DAG dag = build(jobConf, work, scratchDir, appJarLr, additionalLr, ctx);
+        // qoop: set alternateDAGs for master DAG
+        dag.setAlternateDAGs(alternateDAGs);
+        // qoop: end of changes
         CallerContext callerContext = CallerContext.create(
             "HIVE", queryPlan.getQueryId(),
             "HIVE_QUERY_ID", queryPlan.getQueryStr());

@@ -137,6 +137,7 @@ public class Driver implements CommandProcessor {
   private static final Logger LOG = LoggerFactory.getLogger(CLASS_NAME);
   static final private LogHelper console = new LogHelper(LOG);
   static final int SHUTDOWN_HOOK_PRIORITY = 0;
+  static final int ALTERNATES = 2; // qoop
   private Runnable shutdownRunner = null;
 
   private int maxRows = 100;
@@ -468,7 +469,8 @@ public class Driver implements CommandProcessor {
       }
 
       perfLogger.PerfLogBegin(CLASS_NAME, PerfLogger.ANALYZE);
-      for (int i = 0; i < 1; i++) {
+      // qoop - for loop addition
+      for (int i = 0; i < ALTERNATES; i++) {
           BaseSemanticAnalyzer sem = SemanticAnalyzerFactory.get(queryState, tree);
           // conf.setIntVar(HiveConf.ConfVars.HIVE_QOOP_COMBINATION, i);
           List<HiveSemanticAnalyzerHook> saHooks =
@@ -531,8 +533,8 @@ public class Driver implements CommandProcessor {
 
           if (plans == null) {
             plans = new LinkedList<QueryPlan>();
-            plans.add(plan);
           }
+          plans.add(plan);
 
           //do the authorization check
           if (!sem.skipAuthorization() &&
@@ -1704,9 +1706,9 @@ public class Driver implements CommandProcessor {
       Hive.get().clearMetaCallTiming();
 
       plan.setStarted();
-      // for (QueryPlan aplan: plans) {
-      //   aplan.setStarted();
-      // }
+      for (QueryPlan aplan: plans) {
+        aplan.setStarted();
+      }
 
       if (SessionState.get() != null) {
         SessionState.get().getHiveHistory().startQuery(queryStr,
@@ -1777,10 +1779,38 @@ public class Driver implements CommandProcessor {
         // This should never happen, if it does, it's a bug with the potential to produce
         // incorrect results.
         assert tsk.getParentTasks() == null || tsk.getParentTasks().isEmpty();
-        driverCxt.addToRunnable(tsk);
+        // qoop: changes
+        if (queryStr.startsWith("use")) {
+          LOG.info("Added DDL Task");
+          driverCxt.addToRunnable(tsk);
+        }
+      }
+      // qoop: add alternates to last task
+      if (!queryStr.startsWith("use")) {
+        int i = 0;
+        List<Task<? extends Serializable>> alternateTasks = new ArrayList<Task<? extends Serializable>>();
+        for (QueryPlan aplan: plans) {
+          // assuming each plan has only one root task - holds true for hive-on-tez jobs
+          for (Task<? extends Serializable> tsk : aplan.getRootTasks()) {
+            // This should never happen, if it does, it's a bug with the potential to produce
+            // incorrect results.
+            assert tsk.getParentTasks() == null || tsk.getParentTasks().isEmpty();
+            LOG.info("Added actual root task " + i + " time");
+            if (i == ALTERNATES - 1) {
+              // this is the task to execute
+              tsk.setAlternateTasks(alternateTasks);
+              driverCxt.addToRunnable(tsk);
+            } else {
+              // this is an alternate task
+              alternateTasks.add(tsk);
+            }
+            i++;
+          }
+        }
       }
 
       perfLogger.PerfLogBegin(CLASS_NAME, PerfLogger.RUN_TASKS);
+
       // Loop while you either have tasks running, or tasks queued up
       while (driverCxt.isRunning()) {
 
@@ -2139,41 +2169,41 @@ public class Driver implements CommandProcessor {
    * @param cxt
    *          the driver context
    */
-  private TaskRunner launchTask(List<Task<? extends Serializable>> tsks, String queryId, boolean noName,
-      String jobname, int jobs, DriverContext cxt) throws HiveException {
-    if (SessionState.get() != null) {
-      SessionState.get().getHiveHistory().startTask(queryId, tsk, tsk.getClass().getName());
-    }
-    if (tsk.isMapRedTask() && !(tsk instanceof ConditionalTask)) {
-      if (noName) {
-        conf.set(MRJobConfig.JOB_NAME, jobname + "(" + tsk.getId() + ")");
-      }
-      conf.set("mapreduce.workflow.node.name", tsk.getId());
-      Utilities.setWorkflowAdjacencies(conf, plan);
-      cxt.incCurJobNo(1);
-      console.printInfo("Launching Job " + cxt.getCurJobNo() + " out of " + jobs);
-    }
-    tsk.initialize(queryState, plan, cxt, ctx.getOpContext());
-    TaskResult tskRes = new TaskResult();
-    TaskRunner tskRun = new TaskRunner(tsk, tskRes);
+  // private TaskRunner launchTask(List<Task<? extends Serializable>> tsk, String queryId, boolean noName,
+  //     String jobname, int jobs, DriverContext cxt) throws HiveException {
+  //   if (SessionState.get() != null) {
+  //     SessionState.get().getHiveHistory().startTask(queryId, tsk, tsk.getClass().getName());
+  //   }
+  //   if (tsk.isMapRedTask() && !(tsk instanceof ConditionalTask)) {
+  //     if (noName) {
+  //       conf.set(MRJobConfig.JOB_NAME, jobname + "(" + tsk.getId() + ")");
+  //     }
+  //     conf.set("mapreduce.workflow.node.name", tsk.getId());
+  //     Utilities.setWorkflowAdjacencies(conf, plan);
+  //     cxt.incCurJobNo(1);
+  //     console.printInfo("Launching Job " + cxt.getCurJobNo() + " out of " + jobs);
+  //   }
+  //   tsk.initialize(queryState, plan, cxt, ctx.getOpContext());
+  //   TaskResult tskRes = new TaskResult();
+  //   TaskRunner tskRun = new TaskRunner(tsk, tskRes);
 
-    cxt.launching(tskRun);
-    // Launch Task
-    if (HiveConf.getBoolVar(conf, HiveConf.ConfVars.EXECPARALLEL) && tsk.isMapRedTask()) {
-      // Launch it in the parallel mode, as a separate thread only for MR tasks
-      if (LOG.isInfoEnabled()){
-        LOG.info("Starting task [" + tsk + "] in parallel");
-      }
-      tskRun.setOperationLog(OperationLog.getCurrentOperationLog());
-      tskRun.start();
-    } else {
-      if (LOG.isInfoEnabled()){
-        LOG.info("Starting task [" + tsk + "] in serial mode");
-      }
-      tskRun.runSequential();
-    }
-    return tskRun;
-  }
+  //   cxt.launching(tskRun);
+  //   // Launch Task
+  //   if (HiveConf.getBoolVar(conf, HiveConf.ConfVars.EXECPARALLEL) && tsk.isMapRedTask()) {
+  //     // Launch it in the parallel mode, as a separate thread only for MR tasks
+  //     if (LOG.isInfoEnabled()){
+  //       LOG.info("Starting task [" + tsk + "] in parallel");
+  //     }
+  //     tskRun.setOperationLog(OperationLog.getCurrentOperationLog());
+  //     tskRun.start();
+  //   } else {
+  //     if (LOG.isInfoEnabled()){
+  //       LOG.info("Starting task [" + tsk + "] in serial mode");
+  //     }
+  //     tskRun.runSequential();
+  //   }
+  //   return tskRun;
+  // }
 
   public boolean isFetchingTable() {
     return fetchTask != null;

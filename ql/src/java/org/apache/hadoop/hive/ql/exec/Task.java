@@ -86,6 +86,8 @@ public abstract class Task<T extends Serializable> implements Serializable, Node
 
   protected String id;
   protected T work;
+  // QOOP: works will have alternative logically equivalent works
+  protected List<T> works;
   private TaskState taskState = TaskState.CREATED;
   private String statusMessage;
   private String diagnosticMesg;
@@ -129,6 +131,10 @@ public abstract class Task<T extends Serializable> implements Serializable, Node
   // Bean methods
 
   protected boolean rootTask;
+    
+  // qoop: additions
+  protected List<Task<? extends Serializable>> alternateTasks;
+  // qoop: end changes
 
   protected List<Task<? extends Serializable>> childTasks;
   protected List<Task<? extends Serializable>> parentTasks;
@@ -220,15 +226,47 @@ public abstract class Task<T extends Serializable> implements Serializable, Node
     this.rootTask = rootTask;
   }
 
-  public void setChildTasks(List<Task<? extends Serializable>> childTasks) {
-    this.childTasks = childTasks;
+  // qoop: additions for alternate tasks
+  public void setAlternateTasks(List<Task<? extends Serializable>> alternateTasks) {
+    this.alternateTasks = alternateTasks;
   }
+
+  public List<Task<? extends Serializable>> getAlternateTasks() {
+    return alternateTasks;
+  }
+
+  public int getNumAlternates() {
+    return alternateTasks == null ? 0 : alternateTasks.size();
+  }
+  
+  public boolean addAlternateTask(Task<? extends Serializable> alternate) {
+    boolean ret = false;
+    if (getAlternateTasks() == null) {
+      setAlternateTasks(new ArrayList<Task<? extends Serializable>>());
+    }
+    if (!getAlternateTasks().contains(alternate)) {
+      ret = true;
+      getAlternateTasks().add(alternate);
+    }
+    return ret;
+  }
+  
+  public void removeAlteranteTask(Task<? extends Serializable> alternate) {
+    if ((getAlternateTasks() != null) && (getAlternateTasks().contains(alternate))) {
+      getAlternateTasks().remove(alternate);
+    }
+  }  
+  // qoop: end of changes
 
   @Override
   public List<? extends Node> getChildren() {
     return getChildTasks();
   }
-
+  
+  public void setChildTasks(List<Task<? extends Serializable>> childTasks) {
+    this.childTasks = childTasks;
+  }
+  
   public List<Task<? extends Serializable>> getChildTasks() {
     return childTasks;
   }
