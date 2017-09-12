@@ -1780,13 +1780,13 @@ public class Driver implements CommandProcessor {
         // incorrect results.
         assert tsk.getParentTasks() == null || tsk.getParentTasks().isEmpty();
         // qoop: changes
-        if (queryStr.startsWith("use")) {
+        if (!queryStr.startsWith("select")) {
           LOG.info("Added DDL Task");
           driverCxt.addToRunnable(tsk);
         }
       }
       // qoop: add alternates to last task
-      if (!queryStr.startsWith("use")) {
+      if (queryStr.startsWith("select")) {
         int i = 0;
         List<Task<? extends Serializable>> alternateTasks = new ArrayList<Task<? extends Serializable>>();
         for (QueryPlan aplan: plans) {
